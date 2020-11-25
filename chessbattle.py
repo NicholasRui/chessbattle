@@ -1,399 +1,459 @@
-import numpy as np
 import time
+import chess
+import copy
+import numpy as np
+from func_timeout import func_timeout, FunctionTimedOut
+
 import pdb
 
-# ==============================================================================
-# CONSTANTS
-# ==============================================================================
-ReferenceRank = np.array([[ii for jj in range(8)] for ii in range(8)])
-ReferenceFile = np.array([[jj for jj in range(8)] for ii in range(8)])
 
-def algebraic(position):
-    """ Converts algebraic notation to grid position. """
-    assert type(position) == str
-    assert len(position) == 2
-    
-    return (8 - int(position[1]), {'a': 0, 'b': 1, 'c': 2, 'd': 3, 'e': 4, 'f': 5, 'g': 6, 'h': 7}[position[0]])
 
-class Board:
+# to do:
+# - implement draw
+# - implement trash talk
+# - write an output file
+# - visualization
+
+
+
+
+class SampleStockfish:
     """
-    Board object stores chess board together with useful methods and turn
-    parameters.
-    
-    == Parameters ==
-    grid, array object (default: None):
-      Board grid before move was played
-      If None, initialize default board
-    
-    to_move, str (default: 'white'):
-      Player to move, 'white' if white and 'black' if black
-    
-    check, bool (default: False):
-      True if in check, False otherwise
-      
-    kingside_castled, bool (default: False):
-      True if the player to move is unable to castle kingside
-      
-    queenside_castled, bool (default: False):
-      True if the player to move is unable to castle queenside
-      
-    en_passant, tuple (default: None):
-      If int, allow en passants on the file described
-    
-    == Attributes ==
-    
-    grid, np.ndarray:
-      8x8 array describing the board
-      
-    == Methods ==
-    
-    legal_moves, list:
-      Lists all legal moves as tuples (initial position, final position, *)
+    Stockfish player class.
     """
-    def __init__(self, grid=None, to_move='white', en_passant=None, kingside_castled=False, queenside_castled=False):        
-        if grid is None:
-            # Initialize a new board
-            self.grid = np.array([['bR', 'bN', 'bB', 'bK', 'bQ', 'bB', 'bN', 'bR'],
-                                  ['bP', 'bP', 'bP', 'bP', 'bP', 'bP', 'bP', 'bP'],
-                                  ['  ', '  ', '  ', '  ', '  ', '  ', '  ', '  '],
-                                  ['  ', '  ', '  ', '  ', '  ', '  ', '  ', '  '],
-                                  ['  ', '  ', '  ', '  ', '  ', '  ', '  ', '  '],
-                                  ['  ', '  ', '  ', '  ', '  ', '  ', '  ', '  '],
-                                  ['wP', 'wP', 'wP', 'wP', 'wP', 'wP', 'wP', 'wP'],
-                                  ['wR', 'wN', 'wB', 'wK', 'wQ', 'wB', 'wN', 'wR']])
+    def __init__(self, side, board, max_time_per_move, time_control):
+        """
+        Initialize player class to implement Stockfish.
+
+        side: str
+          Either 'white' or 'black' for the side that the player is expected to play
+
+        board: Board (default: chess.Board())
+          Initial board configuration (the default is just the normal board).
+
+        max_time_per_move: float (default: None)
+          Max. thinking time (in sec) to be passed to the players.
+        
+        time_control: 2-tuple of floats (default: None)
+          The time control, formatted as (x, y) where the time control is x minutes
+          with a y second increment. This argument is distinct from max_time_per_move.
+        """    
+        self.side = side
+        self.board = board
+        self.max_time_per_move = max_time_per_move
+        self.time_control = time_control
+        
+        from stockfish import Stockfish
+        self.stockfish = Stockfish('./stockfish-11-win/Windows/stockfish_20011801_x64_modern.exe')
+    
+    def make_move(self):
+        """
+        Method to make a move. Returns the move in UCI.
+        """
+        self.stockfish.set_fen_position(self.board.fen())
+        
+        if self.max_time_per_move is not None:
+            move = self.stockfish.get_best_move_time(0.8 * self.max_time_per_move * 1000)
         else:
-            self.grid = grid
+            move = self.stockfish.get_best_move_time(1e3)
         
-        self.to_move = to_move
-        self.check = False
-        self.kingside_castled = kingside_castled
-        self.queenside_castled = queenside_castled
-        self.en_passant = en_passant
+        self.board.push(chess.Move.from_uci(move))
+        
+        return move
     
-    def make_move(self, move):
+    def receive_move(self, move, time_left=None):
         """
-        Return modified board.
+        Method to update board with move from the other side.
+        
+        move: str
+          Move that opponent made
+        
+        time_left: float (default: None)
+          Time remaining, if None, there is no global time control
         """
-        grid = np.copy(self.grid)
+        self.board.push(chess.Move.from_uci(move))
         
-        # Play the move provided it is a legal move and return the modified grid.
-        if move in self.legal_moves():
-            piece = grid[move[0]]
-            grid[move[0]] = '  '
-            grid[move[1]] = piece
-            
-            if len(move) == 3:
-                changes = move[2]
-                for ii in range(len(changes)):
-                    change = changes[ii]
-                    
-                    grid[change[0]] = change[1]
-    
-            return grid
-        else:
-            return None
-    
-    def legal_moves(self):
-        """
-        Returns a list of legal moves, in the following format.
-        
-        (initial position, final position, [list of other environmental changes])
-        """
-        moves = []
-            
-        # Write down all moves, noting that you are not allowed to do anything
-        # which puts your king into check
-        if self.to_move == 'white':
-            pref = 'w'
-            epref = 'b'
-            start_rank = 6
-            promote_rank = 1
-            forward = -1
-        elif self.to_move == 'black':
-            pref = 'b'
-            epref = 'w'
-            start_rank = 1
-            promote_rank = 6
-            forward = 1
-        
-        # Pawns
-        ranks, files = np.where(self.grid == pref + 'P')
-        
-        pawn_moves = []
-        for ii in range(len(ranks)):                    
-            # Check if anything is in front of the pawn, allow move if not
-            if self.grid[(ranks[ii] + forward, files[ii])] == '  ':
-                if ranks[ii] == promote_rank:
-                    pawn_moves.append( ((ranks[ii], files[ii]), (ranks[ii] + forward, files[ii]),
-                                        [((promote_rank + forward, files[ii]), pref + 'N')]))
-                    pawn_moves.append( ((ranks[ii], files[ii]), (ranks[ii] + forward, files[ii]),
-                                        [((promote_rank + forward, files[ii]), pref + 'B')]))
-                    pawn_moves.append( ((ranks[ii], files[ii]), (ranks[ii] + forward, files[ii]),
-                                        [((promote_rank + forward, files[ii]), pref + 'R')]))
-                    pawn_moves.append( ((ranks[ii], files[ii]), (ranks[ii] + forward, files[ii]),
-                                        [((promote_rank + forward, files[ii]), pref + 'Q')]))
-                else:
-                    pawn_moves.append( ((ranks[ii], files[ii]), (ranks[ii] + forward, files[ii])) )
-                
-            # If on starting rank, can advance two spaces (provided no obstructions)
-            if (ranks[ii] == start_rank) and (self.grid[(start_rank + forward, files[ii])] == '  ') and (self.grid[(start_rank + 2 * forward, files[ii])] == '  '):
-                pawn_moves.append( ((ranks[ii], files[ii]), (ranks[ii] + 2 * forward, files[ii])) )
-                    
-            # Diagonal capture mechanism for pawns
-            if files[ii] != 7:
-                if self.grid[(ranks[ii] + forward, files[ii] + 1)][0] == epref:
-                    if ranks[ii] == promote_rank:
-                        pawn_moves.append( ((ranks[ii], files[ii]), (ranks[ii] + forward, files[ii] + 1),
-                                            [((promote_rank + forward, files[ii] + 1), pref + 'N')]))
-                        pawn_moves.append( ((ranks[ii], files[ii]), (ranks[ii] + forward, files[ii] + 1),
-                                            [((promote_rank + forward, files[ii] + 1), pref + 'B')]))
-                        pawn_moves.append( ((ranks[ii], files[ii]), (ranks[ii] + forward, files[ii] + 1),
-                                            [((promote_rank + forward, files[ii] + 1), pref + 'R')]))
-                        pawn_moves.append( ((ranks[ii], files[ii]), (ranks[ii] + forward, files[ii] + 1),
-                                            [((promote_rank + forward, files[ii] + 1), pref + 'Q')]))
-                    else:
-                        pawn_moves.append( ((ranks[ii], files[ii]), (ranks[ii] + forward, files[ii] + 1)) )
-                    
-            if files[ii] != 0:
-                if self.grid[(ranks[ii] + forward, files[ii] - 1)][0] == epref:
-                    if ranks[ii] == promote_rank:
-                        pawn_moves.append( ((ranks[ii], files[ii]), (ranks[ii] + forward, files[ii] - 1),
-                                            [((promote_rank + forward, files[ii] - 1), pref + 'N')]))
-                        pawn_moves.append( ((ranks[ii], files[ii]), (ranks[ii] + forward, files[ii] - 1),
-                                            [((promote_rank + forward, files[ii] - 1), pref + 'B')]))
-                        pawn_moves.append( ((ranks[ii], files[ii]), (ranks[ii] + forward, files[ii] - 1),
-                                            [((promote_rank + forward, files[ii] - 1), pref + 'R')]))
-                        pawn_moves.append( ((ranks[ii], files[ii]), (ranks[ii] + forward, files[ii] - 1),
-                                            [((promote_rank + forward, files[ii] - 1), pref + 'Q')]))
-                    else:
-                        pawn_moves.append( ((ranks[ii], files[ii]), (ranks[ii] + forward, files[ii] - 1)) )
-                
-            # En passant
-            if (files[ii] != 7) and (ranks[ii] == promote_rank - 2 * forward) and (self.en_passant is not None):
-                if files[ii] + 1 == self.en_passant:
-                    pawn_moves.append( ((ranks[ii], files[ii]), (ranks[ii] + forward, files[ii] + 1),
-                                        [((ranks[ii], files[ii] + 1), '  ')]))
-            
-            if (files[ii] != 0) and (ranks[ii] == promote_rank - 2 * forward) and (self.en_passant is not None):
-                if files[ii] - 1 == self.en_passant:
-                    pawn_moves.append( ((ranks[ii], files[ii]), (ranks[ii] + forward, files[ii] - 1),
-                                        [((ranks[ii], files[ii] - 1), '  ')]))
-            
-        moves += pawn_moves
-            
-        # Knights
-        ranks, files = np.where(self.grid == pref + 'N')
-            
-        knight_moves = []
-        
-        for ii in range(len(ranks)):
-            displacements = [(1,2), (1,-2), (-1, 2), (-1, -2),
-                             (2,1), (2,-1), (-2, 1), (-2, -1)]
-                
-            for jj in range(len(displacements)):
-                good_rank = (ranks[ii] + displacements[jj][0]) >= 0 and (ranks[ii] + displacements[jj][0]) <= 7
-                good_file = (files[ii] + displacements[jj][1]) >= 0 and (files[ii] + displacements[jj][1]) <= 7
-                
-                if good_rank and good_file:
-                    no_self_capture = self.grid[ranks[ii] + displacements[jj][0], files[ii] + displacements[jj][1]][0] != pref
-                    
-                    if no_self_capture:
-                        knight_moves.append( ((ranks[ii], files[ii]), (ranks[ii] + displacements[jj][0], files[ii] + displacements[jj][1])) )
-        
-        moves += knight_moves
-            
-        # Bishops
-        ranks, files = np.where(self.grid == pref + 'B')
-            
-        bishop_moves = []
-            
-        displacements = [(1, 1), (1, -1), (-1, 1), (-1, -1)]
-        
-        for ii in range(len(ranks)):
-            for jj in range(len(displacements)):
-                unblocked = True
-                newrank = ranks[ii]
-                newfile = files[ii]
-                    
-                while unblocked:
-                    newrank += displacements[jj][0]
-                    newfile += displacements[jj][1]
-                        
-                    good_rank = (newrank >= 0) and (newrank <= 7)
-                    good_file = (newfile >= 0) and (newfile <= 7)
-                        
-                    if good_rank and good_file:
-                        if self.grid[(newrank, newfile)] == '  ':
-                            bishop_moves.append( ((ranks[ii], files[ii]), (newrank, newfile)) )
-                        elif self.grid[(newrank, newfile)][0] == epref:
-                            unblocked = False
-                            bishop_moves.append( ((ranks[ii], files[ii]), (newrank, newfile)) )
-                        elif self.grid[(newrank, newfile)][0] == pref:
-                            unblocked = False
-                    else:
-                        unblocked = False
-            
-        moves += bishop_moves
-            
-        # Rooks
-        ranks, files = np.where(self.grid == pref + 'R')
-            
-        rook_moves = []
-        
-        displacements = [(1, 0), (0, 1), (-1, 0), (0, -1)]
-            
-        for ii in range(len(ranks)):
-            for jj in range(len(displacements)):
-                unblocked = True
-                newrank = ranks[ii]
-                newfile = files[ii]
-                    
-                while unblocked:
-                    newrank += displacements[jj][0]
-                    newfile += displacements[jj][1]
-                        
-                    good_rank = (newrank >= 0) and (newrank <= 7)
-                    good_file = (newfile >= 0) and (newfile <= 7)
-                        
-                    if good_rank and good_file:
-                        if self.grid[(newrank, newfile)] == '  ':
-                            rook_moves.append( ((ranks[ii], files[ii]), (newrank, newfile)) )
-                        elif self.grid[(newrank, newfile)][0] == epref:
-                            unblocked = False
-                            rook_moves.append( ((ranks[ii], files[ii]), (newrank, newfile)) )
-                        elif self.grid[(newrank, newfile)][0] == pref:
-                            unblocked = False
-                    else:
-                        unblocked = False
-            
-        moves += rook_moves
-        
-        # Queens
-        ranks, files = np.where(self.grid == pref + 'Q')
-            
-        queen_moves = []
-            
-        displacements = [(1, 1), (1, -1), (-1, 1), (-1, -1), (1, 0), (0, 1), (-1, 0), (0, -1)]
-            
-        for ii in range(len(ranks)):
-            for jj in range(len(displacements)):
-                unblocked = True
-                newrank = ranks[ii]
-                newfile = files[ii]
-                    
-                while unblocked:
-                    newrank += displacements[jj][0]
-                    newfile += displacements[jj][1]
-                        
-                    good_rank = (newrank >= 0) and (newrank <= 7)
-                    good_file = (newfile >= 0) and (newfile <= 7)
-                        
-                    if good_rank and good_file:
-                        if self.grid[(newrank, newfile)] == '  ':
-                            queen_moves.append( ((ranks[ii], files[ii]), (newrank, newfile)) )
-                        elif self.grid[(newrank, newfile)][0] == epref:
-                            unblocked = False
-                            queen_moves.append( ((ranks[ii], files[ii]), (newrank, newfile)) )
-                        elif self.grid[(newrank, newfile)][0] == pref:
-                            unblocked = False
-                    else:
-                        unblocked = False
-            
-        moves += queen_moves
-
-        # Kings
-        ranks, files = np.where(self.grid == pref + 'K')
-        
-        king_moves = []
-            
-        displacements = [(1, 1), (1, -1), (-1, 1), (-1, -1), (1, 0), (0, 1), (-1, 0), (0, -1)]
-            
-        for ii in range(len(ranks)):
-            for jj in range(len(displacements)):
-                newrank = ranks[ii] + displacements[jj][0]
-                newfile = files[ii] + displacements[jj][1]
-                        
-                good_rank = (newrank >= 0) and (newrank <= 7)
-                good_file = (newfile >= 0) and (newfile <= 7)
-                        
-                if good_rank and good_file:
-                    if self.grid[(newrank, newfile)] == '  ':
-                        king_moves.append( ((ranks[ii], files[ii]), (newrank, newfile)) )
-                    elif self.grid[(newrank, newfile)][0] == epref:
-                        king_moves.append( ((ranks[ii], files[ii]), (newrank, newfile)) )
-
-        # Castle
-        kingside_spots = [(start_rank - forward, 1), (start_rank - forward, 2)]
-        queenside_spots = [(start_rank - forward, 4), (start_rank - forward, 5), (start_rank - forward, 6)]
-                
-        if (self.grid[kingside_spots[0]] == '  ') and (self.grid[kingside_spots[1]] == '  ') and not self.kingside_castled:
-            king_moves.append( ((start_rank - forward, 3), (start_rank - forward, 1),
-                                [((start_rank - forward, 0), '  '), ((start_rank - forward, 2), pref + 'R')]) )
-            
-        if (self.grid[queenside_spots[0]] == '  ') and (self.grid[queenside_spots[1]] == '  ') and (self.grid[queenside_spots[2]] == '  ') and not self.queenside_castled:
-            king_moves.append( ((start_rank - forward, 3), (start_rank - forward, 5),
-                                [((start_rank - forward, 7), '  '), ((start_rank - forward, 4), pref + 'R')]) )
-        
-        moves += king_moves
-        
-        
-        # PREVENT CASTLING THROUGH CHECK
-        
-        # REMOVE ANY MOVE WHICH IS NOT ALLOWED BECAUSE OF CHECK
-        
-        
-        return moves
-            
-    #### WOULD CHECK? METHOD FOR SEEING IF A MOVE WOULD PUT THE KING IN CHECK
-
-class Game:
-    """
-    store output of game as well as useful info **
-    """
-    
-    def __init__(self, player1=None, player2=None): # fix player functionality
-        pass
-        # Things to code in
-        # * check if 3fold with same player to move
-        # * check if 50 moves
-        # * check if (can or have) castle
-        # * check if en passant
-        # * check if mate
-        # * check if game cannot be won
-        
-        # Check how many moves to draw
         return
     
-    def play(self):
-        # Initialize board
-        board = Board(kingside_castled=True, queenside_castled=True)
-        print(board.grid)
+    def request_draw(self):
+        """
+        Method to request a draw. Return True if want to request a draw, False if not.
+        """
+        return False
+    
+    def respond_draw(self):
+        """
+        Method to respond to a draw request. Return True if accept draw, False if not.
+        """
+        return False
+    
+    def solicit_trash_talk(self):
+        """
+        Method to solicit trash talk. Return a string to solicit trash talk. If no trash
+        talk, return none.
+        """
+        return None
+
+class SampleMrBean:
+    """
+    Mr. Bean player class.
+    """
+    def __init__(self, side, board, max_time_per_move, time_control):
+        """
+        Initialize player class to implement an idiot bot which plays random moves.
+
+        side: str
+          Either 'white' or 'black' for the side that the player is expected to play
+
+        board: Board (default: chess.Board())
+          Initial board configuration (the default is just the normal board).
+
+        max_time_per_move: float (default: None)
+          Max. thinking time (in sec) to be passed to the players.
         
-        moveno = 0
+        time_control: 2-tuple of floats (default: None)
+          The time control, formatted as (x, y) where the time control is x minutes
+          with a y second increment. This argument is distinct from max_time_per_move.
+        """
+        self.side = side
+        self.board = board
+        self.max_time_per_move = max_time_per_move
+        self.time_control = time_control
+            
+    def make_move(self):
+        """
+        Method to make a move. Returns the move in UCI.
+        """
+        possible_moves = list(self.board.legal_moves)
+        move = np.random.choice(possible_moves).uci()
+        
+        self.board.push(chess.Move.from_uci(move))
+        
+        return move
+    
+    def receive_move(self, move, time_left=None):
+        """
+        Method to update board with move from the other side.
+        
+        move: str
+          Move that opponent made
+        
+        time_left: float (default: None)
+          Time remaining, if None, there is no global time control
+        """
+        self.board.push(chess.Move.from_uci(move))
+        
+        return
+    
+    def request_draw(self):
+        """
+        Method to request a draw. Return True if want to request a draw, False if not.
+        """
+        return False
+    
+    def respond_draw(self):
+        """
+        Method to respond to a draw request. Return True if accept draw, False if not.
+        """
+        return False
+    
+    def solicit_trash_talk(self):
+        """
+        Method to solicit trash talk. Return a string to solicit trash talk. If no trash
+        talk, return none.
+        """
+        return None
 
-        while len(board.legal_moves()) > 0:
-            print('')
-            print('')
-            print('')
-            # As a test, randomly play some move
-            legal_moves = board.legal_moves()
-            move = legal_moves[np.random.randint(len(legal_moves))]
-            
-            new_grid = board.make_move(move)
-            moveno += 1
-            
-            if moveno > 0:
-                time.sleep(0.2)
-            
-            if board.to_move == 'white':
-                board = Board(new_grid, to_move='black', kingside_castled=True, queenside_castled=True)
-            elif board.to_move == 'black':
-                board = Board(new_grid, to_move='white', kingside_castled=True, queenside_castled=True)
-            
-            print(board.grid)
 
-        print(moveno)
-        return board
+
+
+    
+
+
+
+def play_game(PlayerWhite, PlayerBlack, max_time_per_move=None, time_control=None, seed=0, board=chess.Board(fen=chess.STARTING_FEN)):
+    """
+    Initializes game.
+    
+    ----------
+    Parameters
+    ----------
+    PlayerWhite: Class
+      Player class corresponding to the white pieces.
+    
+    PlayerBlack: Class
+      Player class corresponding to the black pieces.
+    
+    max_time_per_move: float (default: None)
+      Max. thinking time (in sec) to be passed to the players.
+    
+    time_control: 2-tuple of floats (default: None)
+      The time control, formatted as (x, y) where the time control is x minutes
+      with a y second increment. This argument is distinct from max_time_per_move.
+    
+    seed: int (default: 0)
+      Random seed used to initialize state.
+    
+    board: Board (default: chess.Board())
+      Initial board configuration (the default is just the normal board).
+    """
+    np.random.seed(seed)
+    board = copy.deepcopy(board)
+    
+    white = PlayerWhite(side='white',
+                        board=copy.copy(board),
+                        max_time_per_move=max_time_per_move,
+                        time_control=time_control)
+    black = PlayerBlack(side='black',
+                        board=copy.copy(board),
+                        max_time_per_move=max_time_per_move,
+                        time_control=time_control)
+    
+    # Sort the players based on which one is going first in this board configuration
+    if board.turn:
+        players = [white, black]
+        player_names = ['white', 'black']
+        player_bools = [True, False]
+    else:
+        players = [black, white]
+        player_names = ['black', 'white']
+        player_bools = [False, True]
+    
+    if time_control is not None:
+        total_time0 = 60 * time_control[0]
+        total_time1 = 60 * time_control[0]
+        increment = time_control[1]
+        player_names = ['white', 'black']
+    
+    player0_times = []
+    player1_times = []
+    
+    first_turn = True
+    
+    while True:
+        ########################################################################
+        # PLAYER 0
+        ########################################################################
+        
+        # Player 0 time control
+        if time_control is not None and max_time_per_move is not None:
+            timeout0 = np.max([total_time0, max_time_per_move])
+        elif time_control is not None:
+            timeout0 = total_time0
+        elif max_time_per_move is not None:
+            timeout0 = max_time_per_move
+        else:
+            timeout0 = None
+        
+        # Construct player 0 move
+        if first_turn:
+            def turn0():
+                move0 = players[0].make_move()
+                
+                return move0
+            
+            first_turn = False
+        else:
+            if time_control is not None:
+                def turn0():
+                    players[0].receive_move(move1, time_left=total_time0)
+                    move0 = players[0].make_move()
+                    
+                    return move0
+                    
+            else:
+                def turn0():
+                    players[0].receive_move(move1, time_left=None)
+                    move0 = players[0].make_move()
+                    
+                    return move0
+        
+        # Attempt to perform player 0 move
+        try:
+            start = time.time()
+            move0 = func_timeout(timeout=timeout0, func=turn0)
+            time0 = time.time() - start
+            
+            if timeout0 is not None: # if python delay finishes up but external code runs over, correct time
+                time0 = np.min([time0, timeout0])
+        except FunctionTimedOut: # runs out of time
+            if board.has_insufficient_material(player_bools[1]):
+                game_result = f'Draw:timeout with insufficient material'
+            else:
+                game_result = f'Win {player_names[1]}:timeout'
+            break
+        except: # another error is thrown
+            game_result = f'Win {player_names[1]}:runtime error'
+            break
+        
+        # Update player 0 time control
+        if time_control is not None:
+            total_time0 -= time0
+            total_time0 += increment
+        
+        # Attempt to push move
+        if not board.is_legal(chess.Move.from_uci(move0)): # illegal move
+            game_result = f'Win {player_names[1]}:illegal move'
+            break
+        try:
+            board.push(chess.Move.from_uci(move0))
+        except: # invalid move
+            game_result = f'Win {player_names[1]}:invalid move'
+            break
+        
+        # Check if game ends naturally
+        if board.is_game_over():
+            if board.is_checkmate():
+                game_result = f'Win {player_names[0]}:checkmate'
+            if board.is_stalemate():
+                game_result = f'Draw:stalemate'
+            if board.is_insufficient_material():
+                game_result = f'Draw:insufficient material'
+            if board.can_claim_threefold_repetition():
+                game_result = f'Draw:threefold repetition'
+            if board.can_claim_fifty_moves():
+                game_result = f'Draw:fifty-move rule'
+            
+            break
+        
+        print(f'white: {time0} s')
+        print(board)
+        print('\n')
+        
+        ########################################################################
+        # PLAYER 1
+        ########################################################################
+        
+        # Player 1 time control
+        if time_control is not None and max_time_per_move is not None:
+            timeout1 = np.max([total_time0, max_time_per_move])
+        elif time_control is not None:
+            timeout1 = total_time1
+        elif max_time_per_move is not None:
+            timeout1 = max_time_per_move
+        else:
+            timeout1 = None
+        
+        # Construct player 1 move
+        if time_control is not None:
+            def turn1():
+                players[1].receive_move(move0, time_left=total_time1)
+                move1 = players[1].make_move()
+                
+                return move1
+                
+        else:
+            def turn1():
+                players[1].receive_move(move0, time_left=None)
+                move1 = players[1].make_move()
+                
+                return move1
+        
+        # Attempt to perform player 1 move
+        try:
+            start = time.time()
+            move1 = func_timeout(timeout=timeout1, func=turn1)
+            time1 = time.time() - start
+            
+            if timeout1 is not None: # if python delay finishes up but external code runs over, correct time
+                time1 = np.min([time1, timeout1])
+        except FunctionTimedOut: # runs out of time
+            if board.has_insufficient_material(player_bools[0]):
+                game_result = f'Draw:timeout with insufficient material'
+            else:
+                game_result = f'Win {player_names[0]}:timeout'
+            break
+        except: # another error is thrown
+            game_result = f'Win {player_names[0]}:runtime error'
+            break
+        
+        # Update player 1 time control
+        if time_control is not None:
+            total_time1 -= time1
+            total_time1 += increment
+        
+        # Attempt to push move
+        if not board.is_legal(chess.Move.from_uci(move1)): # illegal move
+            game_result = f'Win {player_names[0]}:illegal move'
+            break
+        try:
+            board.push(chess.Move.from_uci(move1))
+        except: # invalid move
+            game_result = f'Win {player_names[0]}:invalid move'
+            break
+        
+        # Check if game ends naturally
+        if board.is_game_over():
+            if board.is_checkmate():
+                game_result = f'Win {player_names[1]}:checkmate'
+            if board.is_stalemate():
+                game_result = f'Draw:stalemate'
+            if board.is_insufficient_material():
+                game_result = f'Draw:insufficient material'
+            if board.can_claim_threefold_repetition():
+                game_result = f'Draw:threefold repetition'
+            if board.can_claim_fifty_moves():
+                game_result = f'Draw:fifty-move rule'
+            
+            break
+        
+        print(f'black: {time1} s')
+        print(board)
+        print('\n')
+    
+    print(board)
+    print('\n')
+    print(game_result)    
+    
+    
+    
+    
+    
+    
+    # do timing
+    # draw
+    
+    # write out:
+    # - response times
+    # - moves
+    # outcome
+    # metadata about the game
+    ...
+
+
+
+
+
+
+
+# Tests
+def test_stockfish_vs_stockfish(seed=0):
+    play_game(SampleStockfish, SampleStockfish, seed=seed)
+
+def test_stockfish_vs_stockfish_time_control_1(seed=0):
+    play_game(SampleStockfish, SampleStockfish, time_control=(3,2), seed=seed)
+
+def test_stockfish_vs_stockfish_time_control_2(t=0.3, seed=0):
+    play_game(SampleStockfish, SampleStockfish, max_time_per_move=t, seed=seed)
+    
+def test_mrbean_vs_mrbean(seed=0):
+    play_game(SampleMrBean, SampleMrBean, seed=seed)
+
+def test_mrbean_vs_stockfish(seed=0):
+    play_game(SampleMrBean, SampleStockfish, seed=seed)
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
