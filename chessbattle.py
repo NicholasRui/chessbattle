@@ -4,312 +4,9 @@ import copy
 import numpy as np
 from func_timeout import func_timeout, FunctionTimedOut
 
-import pdb
-
-
-
-# to do:
-# - write up rules
-#    - draw time = 5
-#    - trash talk time
-#    - set a time control
-#    - set a procedure for inquiries, requesting permission to use a package > anon upon request, "sensitive info" is redacted
-#    - need to have a name, and need to provide a png personifying your engine - teams of two
-#    - explain what all the things do
-#    - procedure for crashing
-#    - 10 games, if tied, need, continue to play games until someone wins up until 20, and then flip a dice
-#    - not allowed to numpy.seed
-#    - not allowed to use stockfish evaluation or anything, YOU ARE allowed to use the abilities of 
-# - implement ability to receive and respond to trash talk
-# - write an output file
-# - visualization
-
-
-
-
-class SampleStockfish:
-    """
-    Stockfish player class.
-    """
-    def __init__(self, side, board, max_time_per_move, time_control):
-        """
-        Initialize player class to implement Stockfish.
-
-        side: str
-          Either 'white' or 'black' for the side that the player is expected to play
-
-        board: Board (default: chess.Board())
-          Initial board configuration (the default is just the normal board).
-
-        max_time_per_move: float (default: None)
-          Max. thinking time (in sec) to be passed to the players.
-        
-        time_control: 2-tuple of floats (default: None)
-          The time control, formatted as (x, y) where the time control is x minutes
-          with a y second increment. This argument is distinct from max_time_per_move.
-        """
-        self.name = 'Stockfish'
-        
-        self.side = side
-        self.board = board
-        self.max_time_per_move = max_time_per_move
-        self.time_control = time_control
-        
-        # Manage time control
-        if self.time_control is not None and self.max_time_per_move is not None:
-            self.time_left = np.min([60 * self.time_control[0], self.max_time_per_move])
-        elif self.time_control is not None:
-            self.time_left = 60 * self.time_control[0]
-        elif self.max_time_per_move is not None:
-            self.time_left = self.max_time_per_move
-        else:
-            self.time_left = None
-        
-        # Start Stockfish
-        from stockfish import Stockfish
-        self.stockfish = Stockfish('./stockfish-11-win/Windows/stockfish_20011801_x64_modern.exe')
-    
-    def make_move(self):
-        """
-        Method to make a move. Returns the move in UCI.
-        """
-        self.stockfish.set_fen_position(self.board.fen())
-        if self.time_left is not None:
-            move = self.stockfish.get_best_move_time(0.8 * self.time_left * 1000)
-        else:
-            # If no time controls, make this 30 s
-            move = self.stockfish.get_best_move_time(30 * 1000)
-        
-        self.board.push(chess.Move.from_uci(move))
-        
-        return move
-    
-    def receive_move(self, move, time_left=None):
-        """
-        Method to update board with move from the other side.
-        
-        move: str
-          Move that opponent made
-        
-        time_left: float (default: None)
-          Time remaining, if None, there is no global time control
-        """
-        self.board.push(chess.Move.from_uci(move))
-        self.time_left = time_left
-        
-        return
-    
-    def request_draw(self):
-        """
-        Method to request a draw. Return True if want to request a draw, False if not.
-        """
-        return False
-    
-    def respond_draw(self):
-        """
-        Method to respond to a draw request. Return True if accept draw, False if not.
-        """
-        return False
-    
-    def solicit_trash_talk(self):
-        """
-        Method to solicit trash talk. Return a string to solicit trash talk. If no trash
-        talk, return none.
-        """
-        return None
-
-class SampleMrBean:
-    """
-    Mr. Bean player class.
-    """
-    def __init__(self, side, board, max_time_per_move, time_control):
-        """
-        Initialize player class to implement an idiot bot which plays random moves.
-
-        side: str
-          Either 'white' or 'black' for the side that the player is expected to play
-
-        board: Board (default: chess.Board())
-          Initial board configuration (the default is just the normal board).
-
-        max_time_per_move: float (default: None)
-          Max. thinking time (in sec) to be passed to the players.
-        
-        time_control: 2-tuple of floats (default: None)
-          The time control, formatted as (x, y) where the time control is x minutes
-          with a y second increment. This argument is distinct from max_time_per_move.
-        """
-        self.name = 'Mr. Bean'
-        
-        self.side = side
-        self.board = board
-        self.max_time_per_move = max_time_per_move
-        self.time_control = time_control
-            
-    def make_move(self):
-        """
-        Method to make a move. Returns the move in UCI.
-        """
-        possible_moves = list(self.board.legal_moves)
-        move = np.random.choice(possible_moves).uci()
-        
-        self.board.push(chess.Move.from_uci(move))
-        
-        return move
-    
-    def receive_move(self, move, time_left=None):
-        """
-        Method to update board with move from the other side.
-        
-        move: str
-          Move that opponent made
-        
-        time_left: float (default: None)
-          Time remaining, if None, there is no global time control
-        """
-        self.board.push(chess.Move.from_uci(move))
-        
-        return
-    
-    def request_draw(self):
-        """
-        Method to request a draw. Return True if want to request a draw, False if not.
-        """
-        return False
-    
-    def respond_draw(self):
-        """
-        Method to respond to a draw request. Return True if accept draw, False if not.
-        """
-        return False
-    
-    def solicit_trash_talk(self):
-        """
-        Method to solicit trash talk. Return a string to solicit trash talk. If no trash
-        talk, return none.
-        """
-        return None
-
-class SampleHuman:
-    """
-    Human player class. Accepts user input for the moves.
-    """
-    def __init__(self, side, board, max_time_per_move, time_control):
-        """
-        Initialize player class to implement Stockfish.
-
-        side: str
-          Either 'white' or 'black' for the side that the player is expected to play
-
-        board: Board (default: chess.Board())
-          Initial board configuration (the default is just the normal board).
-
-        max_time_per_move: float (default: None)
-          Max. thinking time (in sec) to be passed to the players.
-        
-        time_control: 2-tuple of floats (default: None)
-          The time control, formatted as (x, y) where the time control is x minutes
-          with a y second increment. This argument is distinct from max_time_per_move.
-        """
-        self.name = 'Stockfish'
-        
-        self.side = side
-        self.board = board
-        self.max_time_per_move = max_time_per_move
-        self.time_control = time_control
-        
-        # Manage time control
-        if self.time_control is not None and self.max_time_per_move is not None:
-            self.time_left = np.min([60 * self.time_control[0], self.max_time_per_move])
-        elif self.time_control is not None:
-            self.time_left = 60 * self.time_control[0]
-        elif self.max_time_per_move is not None:
-            self.time_left = self.max_time_per_move
-        else:
-            self.time_left = None
-    
-    def make_move(self):
-        """
-        Method to make a move. Returns the move in UCI.
-        """
-        print(f'{self.side} to move...')
-        print('\n')
-        print(self.board)
-        print('\n')
-        
-        if self.time_left is not None:
-            print(f'  Time left: {self.time_left}')
-        
-        print('  What is your move?')
-        move = input('   > ')
-        
-        try:
-            self.board.push(chess.Move.from_uci(move))
-        except:
-            pass
-        
-        return move
-    
-    def receive_move(self, move, time_left=None):
-        """
-        Method to update board with move from the other side.
-        
-        move: str
-          Move that opponent made
-        
-        time_left: float (default: None)
-          Time remaining, if None, there is no global time control
-        """
-        self.board.push(chess.Move.from_uci(move))
-        self.time_left = time_left
-        
-        return
-    
-    def request_draw(self):
-        """
-        Method to request a draw. Return True if want to request a draw, False if not.
-        """
-        draw_str = input('  Type "y" to request a draw. Type anything else to pass. ')
-        if draw_str == 'y':
-            draw_bool = True
-        else:
-            draw_bool = False
-        
-        return draw_bool
-    
-    def respond_draw(self):
-        """
-        Method to respond to a draw request. Return True if accept draw, False if not.
-        """
-        print('  Opponent offers a draw. Type "y" to accept. Type anything else to pass. ')
-        draw_str = input('   > ')
-        if draw_str == 'y':
-            draw_bool = True
-        else:
-            draw_bool = False
-        
-        return draw_bool
-    
-    def solicit_trash_talk(self):
-        """
-        Method to solicit trash talk. Return a string to solicit trash talk. If no trash
-        talk, return none.
-        """
-        print('  Any trash talk? ')
-        trash_talk = input('   > ')
-        
-        if len(trash_talk) > 0:
-            return trash_talk
-        else:
-            return None
-
-    
-
-
-
 def play_game(PlayerWhite, PlayerBlack, max_time_per_move_white=None, max_time_per_move_black=None,
               time_control_white=None, time_control_black=None, seed=0, board=chess.Board(fen=chess.STARTING_FEN),
-              draw_time_white=5, trash_talk_time_white=1, draw_time_black=5, trash_talk_time_black=1):
+              draw_time_white=5, trash_talk_time_white=1, draw_time_black=5, trash_talk_time_black=1, verbose=False, write=None):
     """
     Initializes game.
     
@@ -355,10 +52,17 @@ def play_game(PlayerWhite, PlayerBlack, max_time_per_move_white=None, max_time_p
 
     trash_talk_time_black: float (default: 1)
       Time in seconds that a player is allowed to take to produce trash talk.
+    
+    verbose: bool (default: False)
+      If True, print out the board at each step for diagnostic purposes.
+    
+    write: str (default: None)
+      If specified, write the game into a file with the filename specified here.
     """
     np.random.seed(seed)
     board = copy.deepcopy(board)
-        
+    init_fen = board.fen()
+    
     # Sort the players based on which one is going first in this board configuration
     white = PlayerWhite(side='white',
                         board=copy.copy(board),
@@ -508,6 +212,14 @@ def play_game(PlayerWhite, PlayerBlack, max_time_per_move_white=None, max_time_p
         except:
             move_log += f'{player_names[0]} | trash talk solicitation threw error\n'
         
+        if trash_talk is not None:
+            try:
+                func_timeout(timeout=trash_talk_time1, func=players[1].receive_trash_talk, args=(trash_talk,))
+            except FunctionTimedOut:
+                move_log += f'{player_names[1]} | trash talk reception timed out\n'
+            except:
+                move_log += f'{player_names[1]} | trash talk reception threw error\n'
+        
         # Log move
         move_log += f'{player_names[0]} t={time0} | move:{move0}\n'
         
@@ -540,9 +252,10 @@ def play_game(PlayerWhite, PlayerBlack, max_time_per_move_white=None, max_time_p
             
             break
         
-        print(f'white: {time0} s')
-        print(board)
-        print('\n')
+        if verbose:
+            print(f'white: {time0} s')
+            print(board)
+            print('\n')
         
         ########################################################################
         # PLAYER 1
@@ -631,9 +344,17 @@ def play_game(PlayerWhite, PlayerBlack, max_time_per_move_white=None, max_time_p
                 else:
                     move_log += f'{player_names[1]} | trash talk solicitation gave invalid type\n'
         except FunctionTimedOut:
-            move_log += f'{player_names[0]} | trash talk solicitation timed out\n'
+            move_log += f'{player_names[1]} | trash talk solicitation timed out\n'
         except:
-            move_log += f'{player_names[0]} | trash talk solicitation threw error\n'
+            move_log += f'{player_names[1]} | trash talk solicitation threw error\n'
+        
+        if trash_talk is not None:
+            try:
+                func_timeout(timeout=trash_talk_time0, func=players[0].receive_trash_talk, args=(trash_talk,))
+            except FunctionTimedOut:
+                move_log += f'{player_names[0]} | trash talk reception timed out\n'
+            except:
+                move_log += f'{player_names[0]} | trash talk reception threw error\n'
         
         # Log move
         move_log += f'{player_names[1]} t={time1} | move:{move1}\n'
@@ -667,64 +388,38 @@ def play_game(PlayerWhite, PlayerBlack, max_time_per_move_white=None, max_time_p
             
             break
         
-        print(f'black: {time1} s')
+        if verbose:
+            print(f'black: {time1} s')
+            print(board)
+            print('\n')
+    
+    if verbose:
         print(board)
         print('\n')
+        print(game_result)
+        
+        print(move_log)
     
-    print(board)
-    print('\n')
-    print(game_result)
-    
-    print(move_log)
-    
-    
-    
-    
-    # do timing
-    # draw
-    
-    # write out:
-    # metadata about the game
-    ...
-
-
-
-
-
-
-
-# Tests
-def test_stockfish_vs_stockfish(seed=0):
-    play_game(SampleStockfish, SampleStockfish, seed=seed)
-
-def test_stockfish_vs_stockfish_time_control_1(seed=0):
-    play_game(SampleStockfish, SampleStockfish, time_control_white=(3,2), seed=seed)
-
-def test_stockfish_vs_stockfish_time_control_2(t=0.3, seed=0):
-    play_game(SampleStockfish, SampleStockfish, max_time_per_move_white=t, max_time_per_move_black=t, seed=seed)
-
-def test_stockfish_vs_stockfish_time_control_3(t=0.3, seed=0):
-    play_game(SampleStockfish, SampleStockfish, max_time_per_move_white=t, max_time_per_move_black=2*t, seed=seed)
-    
-def test_mrbean_vs_mrbean(seed=0):
-    play_game(SampleMrBean, SampleMrBean, seed=seed)
-
-def test_mrbean_vs_stockfish(seed=0):
-    play_game(SampleMrBean, SampleStockfish, seed=seed)
-
-def test_stockfish_vs_human(t=0.3, seed=0):
-    play_game(SampleStockfish, SampleHuman, max_time_per_move_white=t, draw_time_black=None, trash_talk_time_black=None)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+    if write is not None:
+        text = '--Setup--'
+        text += f'fname:{write}\n'
+        text += f'white:{white.name}\n'
+        text += f'black:{black.name}\n'
+        text += f'Init_fen:{init_fen}\n'
+        text += '--Time Control--\n'
+        
+        text += f'max_time_per_move_white:{max_time_per_move_white}\n'
+        text += f'max_time_per_move_black:{max_time_per_move_black}\n'
+        text += f'time_control_white:{time_control_white}\n'
+        text += f'time_control_black:{time_control_black}\n'
+        text += f'draw_time_white:{draw_time_white}\n'
+        text += f'draw_time_black:{draw_time_black}\n'
+        text += f'trash_talk_time_white:{trash_talk_time_white}\n'
+        text += f'trash_talk_time_black:{trash_talk_time_black}\n'
+        text += '--Game--\n'
+        
+        text += move_log
+        
+        f = open(write, 'w')
+        f.write(text)
+        f.close()
