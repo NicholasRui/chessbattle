@@ -120,14 +120,14 @@ def play_game(PlayerWhite, PlayerBlack, max_time_per_move_white=None, max_time_p
         
         # Player 0 time control
         if time_control0 is not None and max_time_per_move0 is not None:
-            timeout0 = np.max([total_time0, max_time_per_move0])
+            timeout0 = np.min([total_time0, max_time_per_move0])
         elif time_control0 is not None:
             timeout0 = total_time0
         elif max_time_per_move0 is not None:
             timeout0 = max_time_per_move0
         else:
             timeout0 = None
-        
+                
         # Construct player 0 move
         if first_turn:
             def turn0():
@@ -159,6 +159,9 @@ def play_game(PlayerWhite, PlayerBlack, max_time_per_move_white=None, max_time_p
             
             if timeout0 is not None: # if python delay finishes up but external code runs over, correct time
                 time0 = np.min([time0, timeout0])
+            
+            # Log move
+            move_log += f'{player_names[0]} t={time0} | move:{move0}\n'
         except FunctionTimedOut: # runs out of time
             if board.has_insufficient_material(player_bools[1]):
                 game_result = f'Draw:timeout with insufficient material'
@@ -189,7 +192,7 @@ def play_game(PlayerWhite, PlayerBlack, max_time_per_move_white=None, max_time_p
             try:
                 if func_timeout(timeout=draw_time1, func=players[1].respond_draw):
                     move_log += f'{player_names[1]} | accepts draw\n'
-                    game_result = 'Draw:agreement' 
+                    game_result = 'Draw:agreement'
                     break
                 else:
                     move_log += f'{player_names[1]} | declines draw\n'
@@ -219,9 +222,6 @@ def play_game(PlayerWhite, PlayerBlack, max_time_per_move_white=None, max_time_p
                 move_log += f'{player_names[1]} | trash talk reception timed out\n'
             except:
                 move_log += f'{player_names[1]} | trash talk reception threw error\n'
-        
-        # Log move
-        move_log += f'{player_names[0]} t={time0} | move:{move0}\n'
         
         # Attempt to push move
         legality = False
@@ -263,7 +263,7 @@ def play_game(PlayerWhite, PlayerBlack, max_time_per_move_white=None, max_time_p
         
         # Player 1 time control
         if time_control1 is not None and max_time_per_move1 is not None:
-            timeout1 = np.max([total_time0, max_time_per_move1])
+            timeout1 = np.min([total_time1, max_time_per_move1])
         elif time_control1 is not None:
             timeout1 = total_time1
         elif max_time_per_move1 is not None:
@@ -294,6 +294,9 @@ def play_game(PlayerWhite, PlayerBlack, max_time_per_move_white=None, max_time_p
             
             if timeout1 is not None: # if python delay finishes up but external code runs over, correct time
                 time1 = np.min([time1, timeout1])
+            
+            # Log move
+            move_log += f'{player_names[1]} t={time1} | move:{move1}\n'
         except FunctionTimedOut: # runs out of time
             if board.has_insufficient_material(player_bools[0]):
                 game_result = f'Draw:timeout with insufficient material'
@@ -325,7 +328,7 @@ def play_game(PlayerWhite, PlayerBlack, max_time_per_move_white=None, max_time_p
             try:
                 if func_timeout(timeout=draw_time0, func=players[0].respond_draw):
                     move_log += f'{player_names[0]} | accepts draw\n'
-                    game_result = 'Draw:agreement' 
+                    game_result = 'Draw:agreement'
                     break
                 else:
                     move_log += f'{player_names[0]} | declines draw\n'
@@ -355,9 +358,6 @@ def play_game(PlayerWhite, PlayerBlack, max_time_per_move_white=None, max_time_p
                 move_log += f'{player_names[0]} | trash talk reception timed out\n'
             except:
                 move_log += f'{player_names[0]} | trash talk reception threw error\n'
-        
-        # Log move
-        move_log += f'{player_names[1]} t={time1} | move:{move1}\n'
         
         # Attempt to push move
         legality = False
@@ -401,11 +401,12 @@ def play_game(PlayerWhite, PlayerBlack, max_time_per_move_white=None, max_time_p
         print(move_log)
     
     if write is not None:
-        text = '--Setup--'
+        text = '--Setup--\n'
         text += f'fname:{write}\n'
         text += f'white:{white.name}\n'
         text += f'black:{black.name}\n'
-        text += f'Init_fen:{init_fen}\n'
+        text += f'init_fen:{init_fen}\n'
+        text += f'game_result:{game_result}\n'
         text += '--Time Control--\n'
         
         text += f'max_time_per_move_white:{max_time_per_move_white}\n'
